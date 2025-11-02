@@ -7,6 +7,8 @@ from datetime import datetime, timedelta
 from collections import defaultdict
 import sys
 import argparse
+import time
+import select
 
 
 def get_claude_dir():
@@ -273,8 +275,16 @@ def format_total_value(value):
         return f"{int(value)}"
 
 
-def print_stacked_bar_chart(time_series, height=80, days_back=7):
-    """Print a text-based stacked bar chart of token usage breakdown over time."""
+def print_stacked_bar_chart(time_series, height=80, days_back=7, chart_type='all', show_x_axis=True):
+    """Print a text-based stacked bar chart of token usage breakdown over time.
+
+    Args:
+        time_series: Time series data with token breakdown
+        height: Height of the chart
+        days_back: Number of days to show
+        chart_type: 'all' (all 4 types), 'io' (input+output), or 'cache' (cache_creation+cache_read)
+        show_x_axis: Whether to show X-axis labels
+    """
     if not time_series:
         print("No time series data available.")
         return
@@ -333,7 +343,16 @@ def print_stacked_bar_chart(time_series, height=80, days_back=7):
             'cache_creation': cache_creation_val,
             'cache_read': cache_read_val
         })
-        totals.append(input_val + output_val + cache_creation_val + cache_read_val)
+
+        # Calculate total based on chart_type
+        if chart_type == 'io':
+            total = input_val + output_val
+        elif chart_type == 'cache':
+            total = cache_creation_val + cache_read_val
+        else:  # 'all'
+            total = input_val + output_val + cache_creation_val + cache_read_val
+
+        totals.append(total)
 
     # First pass: calculate Y-axis range from all data
     max_value_raw = max(totals) if totals else 1
@@ -367,9 +386,21 @@ def print_stacked_bar_chart(time_series, height=80, days_back=7):
     num_data_points = len(totals)
     chart_height = height
 
-    print("\nToken Usage Breakdown Over Time (1-hour intervals, Local Time)")
-    print(f"Y-axis: Token consumption (all token types)")
-    print(f"X-axis: Time (each day has 24 data points, ticks at 6-hour intervals)\n")
+    # Print chart title based on type
+    if chart_type == 'io':
+        print("\nInput + Output Tokens Over Time (1-hour intervals, Local Time)")
+        print(f"Y-axis: Input and Output token consumption")
+    elif chart_type == 'cache':
+        print("\nCache Tokens Over Time (1-hour intervals, Local Time)")
+        print(f"Y-axis: Cache Creation and Cache Read token consumption")
+    else:
+        print("\nToken Usage Breakdown Over Time (1-hour intervals, Local Time)")
+        print(f"Y-axis: Token consumption (all token types)")
+
+    if show_x_axis:
+        print(f"X-axis: Time (each day has 24 data points, ticks at 6-hour intervals)\n")
+    else:
+        print()
 
     # Scale breakdown values to chart height
     # For each data point, calculate the scaled heights of each segment
@@ -518,18 +549,38 @@ def print_stacked_bar_chart(time_series, height=80, days_back=7):
                 cumulative_cache_creation = cumulative_output + cache_creation_height
                 cumulative_cache_read = cumulative_cache_creation + cache_read_height
 
-                # Determine which character to draw based on current row
-                # ANSI color codes: Blue for input, Green for output, Yellow for cache_creation, Cyan for cache_read
-                if row < cumulative_input:
-                    line += "\033[94m█\033[0m"  # Input tokens (Blue)
-                elif row < cumulative_output:
-                    line += "\033[92m▓\033[0m"  # Output tokens (Green)
-                elif row < cumulative_cache_creation:
-                    line += "\033[93m▒\033[0m"  # Cache creation tokens (Yellow)
-                elif row < cumulative_cache_read:
-                    line += "\033[96m░\033[0m"  # Cache read tokens (Cyan)
+                # Determine which character to draw based on current row and chart_type
+                # ANSI color codes: Blue for input, Green for output, Yellow for cache_creation, Magenta for cache_read
+                if chart_type == 'io':
+                    # Only show input and output
+                    if row < cumulative_input:
+                        line += "\033[94m█\033[0m"  # Input tokens (Bright Blue)
+                    elif row < cumulative_output:
+                        line += "\033[92m▓\033[0m"  # Output tokens (Bright Green)
+                    else:
+                        line += " "  # Empty space
+                elif chart_type == 'cache':
+                    # Only show cache_creation and cache_read, but calculate from 0
+                    cache_only_cumulative_creation = cache_creation_height
+                    cache_only_cumulative_read = cache_only_cumulative_creation + cache_read_height
+                    if row < cache_only_cumulative_creation:
+                        line += "\033[93m▒\033[0m"  # Cache creation tokens (Bright Yellow)
+                    elif row < cache_only_cumulative_read:
+                        line += "\033[95m░\033[0m"  # Cache read tokens (Bright Magenta)
+                    else:
+                        line += " "  # Empty space
                 else:
-                    line += " "  # Empty space
+                    # Show all 4 types
+                    if row < cumulative_input:
+                        line += "\033[94m█\033[0m"  # Input tokens (Bright Blue)
+                    elif row < cumulative_output:
+                        line += "\033[92m▓\033[0m"  # Output tokens (Bright Green)
+                    elif row < cumulative_cache_creation:
+                        line += "\033[93m▒\033[0m"  # Cache creation tokens (Bright Yellow)
+                    elif row < cumulative_cache_read:
+                        line += "\033[95m░\033[0m"  # Cache read tokens (Bright Magenta)
+                    else:
+                        line += " "  # Empty space
 
         print(y_label + line)
 
@@ -543,54 +594,52 @@ def print_stacked_bar_chart(time_series, height=80, days_back=7):
             x_axis_line += "─"
     print("      └" + x_axis_line)  # 6 spaces + └ aligns with Y-axis position
 
-    # X-axis labels (show only 6:00, 12:00, and 18:00) - rotated 90 degrees counter-clockwise
-    print()
+    # X-axis labels (show only if show_x_axis is True)
+    if show_x_axis:
+        # X-axis labels (show only 6:00, 12:00, and 18:00) - rotated 90 degrees counter-clockwise
+        print()
 
-    # Create label for 6:00, 12:00, and 18:00
-    labels = []
-    positions = []
+        # Create label for 6:00, 12:00, and 18:00
+        labels = []
+        positions = []
 
-    for i, time in enumerate(sorted_times):
-        # Only show labels for 6:00, 12:00, and 18:00
-        if time.hour in [6, 12, 18]:
-            # Position is the column index for this data point
-            if i in data_to_col:
-                labels.append(time.strftime('%H'))
-                positions.append(data_to_col[i])
+        for i, time in enumerate(sorted_times):
+            # Only show labels for 6:00, 12:00, and 18:00
+            if time.hour in [6, 12, 18]:
+                # Position is the column index for this data point
+                if i in data_to_col:
+                    labels.append(time.strftime('%H'))
+                    positions.append(data_to_col[i])
 
-    # Find maximum label length
-    max_label_len = max(len(label) for label in labels) if labels else 0
+        # Find maximum label length
+        max_label_len = max(len(label) for label in labels) if labels else 0
 
-    # Print each character position vertically
-    # Position: 6 spaces to align first character with Y-axis │ position
-    # Then add one more space so labels start at column 0 of chart content
-    for char_idx in range(max_label_len):
-        line = "       "  # 7 spaces: aligns with Y-axis format (5 chars + space + │)
+        # Print each character position vertically
+        # Position: 6 spaces to align first character with Y-axis │ position
+        # Then add one more space so labels start at column 0 of chart content
+        for char_idx in range(max_label_len):
+            line = "       "  # 7 spaces: aligns with Y-axis format (5 chars + space + │)
 
-        for col_idx, (col_type, col_data) in enumerate(chart_columns):
-            if col_type == 'separator':
-                char_to_print = "│"
-            else:
-                # Check if this column has a label
-                char_to_print = " "
-                for label_idx, pos in enumerate(positions):
-                    if col_idx == pos and char_idx < len(labels[label_idx]):
-                        char_to_print = labels[label_idx][char_idx]
-                        break
+            for col_idx, (col_type, col_data) in enumerate(chart_columns):
+                if col_type == 'separator':
+                    char_to_print = "│"
+                else:
+                    # Check if this column has a label
+                    char_to_print = " "
+                    for label_idx, pos in enumerate(positions):
+                        if col_idx == pos and char_idx < len(labels[label_idx]):
+                            char_to_print = labels[label_idx][char_idx]
+                            break
 
-            line += char_to_print
+                line += char_to_print
 
-        print(line)
+            print(line)
 
-    # Legend - show token types and their symbols (with colors)
-    print("\n" + "=" * (chart_width + 10))
-    print("\nLegend (stacked from bottom to top):")
-    print(f"  \033[94m█\033[0m Input tokens")
-    print(f"  \033[92m▓\033[0m Output tokens")
-    print(f"  \033[93m▒\033[0m Cache creation tokens")
-    print(f"  \033[96m░\033[0m Cache read tokens")
-    print(f"\nTotal time span: {sorted_times[0].strftime('%Y-%m-%d %H:%M')} to {sorted_times[-1].strftime('%Y-%m-%d %H:%M')}")
-    print(f"Data points: {len(sorted_times)}")
+    # Show summary info only for the last chart (when show_x_axis is True)
+    if show_x_axis:
+        print("\n" + "=" * (chart_width + 10))
+        print(f"Total time span: {sorted_times[0].strftime('%Y-%m-%d %H:%M')} to {sorted_times[-1].strftime('%Y-%m-%d %H:%M')} | Data points: {len(sorted_times)}")
+        print(f"Legend: \033[94m█\033[0m Input  \033[92m▓\033[0m Output  \033[95m░\033[0m Cache Read  \033[93m▒\033[0m Cache Creation")
 
 
 def print_model_chart(time_series, width=100, height=20):
@@ -665,12 +714,12 @@ def print_overall_stats(stats):
 def print_model_breakdown(model_stats):
     """Print model breakdown table."""
     print("Usage by Model")
-    print("=" * 151)
+    print("=" * 154)
 
     # Print header
-    header = f"{'Model':<35} {'Messages':>10} │ {'Input':>15} {'Output':>15} {'Total Token':>15} │ {'Cache Create':>15} {'Cache Read':>15} {'Total (with cache)':>19}"
+    header = f"│ {'Model':<35} {'Messages':>10} │ {'Input':>15} {'Output':>15} {'Total Token':>15} │ {'Cache Create':>15} {'Cache Read':>15} {'Total (with cache)':>19} │"
     print(header)
-    print("-" * 151)
+    print("│" + "-" * 152 + "│")
 
     # Print rows and calculate sums
     sum_messages = 0
@@ -682,14 +731,14 @@ def print_model_breakdown(model_stats):
     sum_total_with_cache = 0
 
     for stats in model_stats:
-        row = (f"{stats['model']:<35} "
+        row = (f"│ {stats['model']:<35} "
                f"{stats['count']:>10} │ "
                f"{format_number(stats['input']):>15} "
                f"{format_number(stats['output']):>15} "
                f"{format_number(stats['total']):>15} │ "
                f"{format_number(stats['cache_creation']):>15} "
                f"{format_number(stats['cache_read']):>15} "
-               f"{format_number(stats['total_with_cache']):>19}")
+               f"{format_number(stats['total_with_cache']):>19} │")
         print(row)
 
         # Accumulate sums
@@ -702,16 +751,17 @@ def print_model_breakdown(model_stats):
         sum_total_with_cache += stats['total_with_cache']
 
     # Print separator and sum row
-    print("-" * 151)
-    sum_row = (f"{'TOTAL':<35} "
+    print("│" + "-" * 152 + "│")
+    sum_row = (f"│ {'TOTAL':<35} "
                f"{sum_messages:>10} │ "
                f"{format_number(sum_input):>15} "
                f"{format_number(sum_output):>15} "
                f"{format_number(sum_total):>15} │ "
                f"{format_number(sum_cache_creation):>15} "
                f"{format_number(sum_cache_read):>15} "
-               f"{format_number(sum_total_with_cache):>19}")
+               f"{format_number(sum_total_with_cache):>19} │")
     print(sum_row)
+    print("=" * 154)
 
 
 def main():
@@ -719,6 +769,8 @@ def main():
     parser = argparse.ArgumentParser(description='Analyze Claude Code usage statistics')
     parser.add_argument('--days', type=int, default=7,
                         help='Number of days to look back (default: 7)')
+    parser.add_argument('--monitor', type=int, nargs='?', const=3600, metavar='INTERVAL',
+                        help='Monitor mode: refresh output every INTERVAL seconds (default: 3600 seconds / 1 hour)')
     args = parser.parse_args()
 
     claude_dir = get_claude_dir()
@@ -728,27 +780,123 @@ def main():
         print(f"Error: Projects directory not found at {projects_dir}")
         sys.exit(1)
 
-    print("Calculating Claude Code usage...")
-    print(f"Showing data from last {args.days} days")
-    print()
+    def print_stats():
+        """Print all statistics (for both one-time and monitor mode)."""
+        # Clear screen in monitor mode
+        if args.monitor:
+            os.system('clear' if os.name != 'nt' else 'cls')
 
-    # Read data
-    usage_data = read_jsonl_files(projects_dir)
+        print("Calculating Claude Code usage...")
+        print(f"Showing data from last {args.days} days")
+        if args.monitor:
+            print(f"Monitor mode: Refreshing every {args.monitor} seconds (Press Ctrl+C to exit)")
+            print(f"Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        print()
 
-    if not usage_data:
-        print("No usage data found.")
+        # Read data
+        usage_data = read_jsonl_files(projects_dir)
+
+        if not usage_data:
+            print("No usage data found.")
+            return False
+
+        # Calculate and print statistics
+        model_stats = calculate_model_breakdown(usage_data)
+        print_model_breakdown(model_stats)
+
+        # Calculate and print token breakdown time series (stacked bar charts)
+        # Use 1-hour intervals for finer granularity
+        breakdown_time_series = calculate_token_breakdown_time_series(usage_data, interval_hours=1)
+
+        # Print two separate charts: I/O tokens and Cache tokens
+        # Each with half the original height (40 instead of 80)
+        print_stacked_bar_chart(breakdown_time_series, height=40, days_back=args.days,
+                                chart_type='io', show_x_axis=False)
+        print_stacked_bar_chart(breakdown_time_series, height=40, days_back=args.days,
+                                chart_type='cache', show_x_axis=True)
+
+        print()
+        return True
+
+    # Monitor mode: interactive continuous refresh
+    if args.monitor:
+        print("\n" + "=" * 80)
+        print("Interactive Monitor Mode")
+        print("=" * 80)
+        print("Commands:")
+        print("  /refresh - Refresh statistics immediately")
+        print("  /exit    - Exit monitor mode")
+        print("  Ctrl+C   - Exit monitor mode")
+        print(f"\nAuto-refresh interval: {args.monitor} seconds")
+        print("=" * 80 + "\n")
+
+        # Initial display
+        print_stats()
+
+        next_refresh_time = time.time() + args.monitor
+
+        def show_prompt():
+            """Display the command prompt."""
+            print("\n" + "─" * 80)
+            print("> ", end='', flush=True)
+
+        # Show initial prompt
+        show_prompt()
+
+        try:
+            while True:
+                now = time.time()
+
+                # Check if it's time for auto-refresh
+                if now >= next_refresh_time:
+                    # Clear the current line (prompt)
+                    print("\r" + " " * 82 + "\r", end='')
+                    print("─" * 80)
+                    print("\n" + "━" * 80)
+                    print("🔄 AUTO-REFRESH")
+                    print("━" * 80 + "\n")
+                    print_stats()
+                    next_refresh_time = time.time() + args.monitor
+                    show_prompt()
+
+                # Wait for input with timeout using select
+                time_until_refresh = next_refresh_time - time.time()
+                timeout = min(1.0, max(0.1, time_until_refresh))
+
+                ready, _, _ = select.select([sys.stdin], [], [], timeout)
+
+                if ready:
+                    command = sys.stdin.readline().strip()
+
+                    if command == "/refresh":
+                        print("─" * 80)
+                        print("\n" + "━" * 80)
+                        print("🔄 MANUAL REFRESH")
+                        print("━" * 80 + "\n")
+                        print_stats()
+                        # Reset auto-refresh timer
+                        next_refresh_time = time.time() + args.monitor
+                        show_prompt()
+                    elif command == "/exit":
+                        print("─" * 80)
+                        print("\nExiting monitor mode...")
+                        break
+                    elif command == "":
+                        # Empty command, just show prompt again
+                        show_prompt()
+                    elif command:
+                        print(f"Unknown command: '{command}'. Available: /refresh, /exit")
+                        show_prompt()
+
+        except KeyboardInterrupt:
+            print("\n" + "─" * 80)
+            print("\nMonitoring stopped.")
+
         sys.exit(0)
-
-    # Calculate and print statistics
-    model_stats = calculate_model_breakdown(usage_data)
-    print_model_breakdown(model_stats)
-
-    # Calculate and print token breakdown time series (stacked bar chart)
-    # Use 1-hour intervals for finer granularity
-    breakdown_time_series = calculate_token_breakdown_time_series(usage_data, interval_hours=1)
-    print_stacked_bar_chart(breakdown_time_series, days_back=args.days)
-
-    print()
+    else:
+        # One-time execution
+        if not print_stats():
+            sys.exit(0)
 
 
 if __name__ == '__main__':
