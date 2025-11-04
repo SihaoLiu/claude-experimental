@@ -392,7 +392,7 @@ def print_stacked_bar_chart(time_series, height=80, days_back=7, chart_type='all
         print(f"Y-axis: Input and Output token consumption")
     elif chart_type == 'cache':
         print("\nCache Tokens Over Time (1-hour intervals, Local Time)")
-        print(f"Y-axis: Cache Creation and Cache Read token consumption")
+        print(f"Y-axis: Cache Output and Cache Input token consumption")
     else:
         print("\nToken Usage Breakdown Over Time (1-hour intervals, Local Time)")
         print(f"Y-axis: Token consumption (all token types)")
@@ -550,7 +550,7 @@ def print_stacked_bar_chart(time_series, height=80, days_back=7, chart_type='all
                 cumulative_cache_read = cumulative_cache_creation + cache_read_height
 
                 # Determine which character to draw based on current row and chart_type
-                # ANSI color codes: Blue for input, Green for output, Yellow for cache_creation, Magenta for cache_read
+                # ANSI color codes: Blue for input, Green for output, Yellow for cache_output, Magenta for cache_input
                 if chart_type == 'io':
                     # Only show input and output
                     if row < cumulative_input:
@@ -564,9 +564,9 @@ def print_stacked_bar_chart(time_series, height=80, days_back=7, chart_type='all
                     cache_only_cumulative_creation = cache_creation_height
                     cache_only_cumulative_read = cache_only_cumulative_creation + cache_read_height
                     if row < cache_only_cumulative_creation:
-                        line += "\033[93m▒\033[0m"  # Cache creation tokens (Bright Yellow)
+                        line += "\033[93m▒\033[0m"  # Cache output tokens (Bright Yellow)
                     elif row < cache_only_cumulative_read:
-                        line += "\033[95m░\033[0m"  # Cache read tokens (Bright Magenta)
+                        line += "\033[95m░\033[0m"  # Cache input tokens (Bright Magenta)
                     else:
                         line += " "  # Empty space
                 else:
@@ -576,9 +576,9 @@ def print_stacked_bar_chart(time_series, height=80, days_back=7, chart_type='all
                     elif row < cumulative_output:
                         line += "\033[92m▓\033[0m"  # Output tokens (Bright Green)
                     elif row < cumulative_cache_creation:
-                        line += "\033[93m▒\033[0m"  # Cache creation tokens (Bright Yellow)
+                        line += "\033[93m▒\033[0m"  # Cache output tokens (Bright Yellow)
                     elif row < cumulative_cache_read:
-                        line += "\033[95m░\033[0m"  # Cache read tokens (Bright Magenta)
+                        line += "\033[95m░\033[0m"  # Cache input tokens (Bright Magenta)
                     else:
                         line += " "  # Empty space
 
@@ -639,7 +639,7 @@ def print_stacked_bar_chart(time_series, height=80, days_back=7, chart_type='all
     if show_x_axis:
         print("\n" + "=" * (chart_width + 10))
         print(f"Total time span: {sorted_times[0].strftime('%Y-%m-%d %H:%M')} to {sorted_times[-1].strftime('%Y-%m-%d %H:%M')} | Data points: {len(sorted_times)}")
-        print(f"Legend: \033[94m█\033[0m Input  \033[92m▓\033[0m Output  \033[95m░\033[0m Cache Read  \033[93m▒\033[0m Cache Creation")
+        print(f"Legend: \033[94m█\033[0m Input  \033[92m▓\033[0m Output  \033[95m░\033[0m Cache Input  \033[93m▒\033[0m Cache Output")
 
 
 def print_model_chart(time_series, width=100, height=20):
@@ -705,8 +705,8 @@ def print_overall_stats(stats):
     print()
     print(f"Input tokens:          {format_number(stats['input_tokens'])}")
     print(f"Output tokens:         {format_number(stats['output_tokens'])}")
-    print(f"Cache creation tokens: {format_number(stats['cache_creation_tokens'])}")
-    print(f"Cache read tokens:     {format_number(stats['cache_read_tokens'])}")
+    print(f"Cache output tokens:   {format_number(stats['cache_creation_tokens'])}")
+    print(f"Cache input tokens:    {format_number(stats['cache_read_tokens'])}")
     print()
     print(f"Total tokens:          {format_number(stats['total_tokens'])}")
 
@@ -717,7 +717,7 @@ def print_model_breakdown(model_stats):
     print("=" * 154)
 
     # Print header
-    header = f"│ {'Model':<35} {'Messages':>10} │ {'Input':>15} {'Output':>15} {'Total Token':>15} │ {'Cache Create':>15} {'Cache Read':>15} {'Total (with cache)':>19} │"
+    header = f"│ {'Model':<35} {'Messages':>10} │ {'Input':>15} {'Output':>15} {'Total Token':>15} │ {'Cache Output':>15} {'Cache Input':>15} {'Total (with cache)':>19} │"
     print(header)
     print("│" + "-" * 152 + "│")
 
