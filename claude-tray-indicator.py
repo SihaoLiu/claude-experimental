@@ -148,9 +148,19 @@ def get_token_stats_label():
 
 class ClaudeUsageIndicator:
     def __init__(self):
+        # Get the script directory and construct icon path
+        script_dir = Path(__file__).parent.absolute()
+        icon_path = script_dir / "claudecode.png"
+
+        # Use custom icon if it exists, otherwise fallback to system icon
+        if icon_path.exists():
+            icon = str(icon_path)
+        else:
+            icon = "dialog-information"
+
         self.indicator = AppIndicator3.Indicator.new(
             "claude-usage-indicator",
-            "dialog-information",  # Use system icon to avoid three dots
+            icon,
             AppIndicator3.IndicatorCategory.APPLICATION_STATUS
         )
         self.indicator.set_status(AppIndicator3.IndicatorStatus.ACTIVE)
@@ -177,8 +187,8 @@ class ClaudeUsageIndicator:
         # Initial update
         self.update_label()
 
-        # Update every 5 minutes (300 seconds = 300000 milliseconds)
-        GLib.timeout_add_seconds(300, self.update_label)
+        # Update every 30 seconds
+        GLib.timeout_add_seconds(30, self.update_label)
 
     def update_label(self):
         """Update the indicator label with current stats."""
