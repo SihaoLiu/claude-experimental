@@ -10,6 +10,7 @@ import argparse
 import time
 import select
 import re
+import zoneinfo
 
 
 def get_subscription_usage():
@@ -84,6 +85,97 @@ def get_subscription_usage():
         return None
 
 
+def parse_reset_time_and_calculate_remaining(reset_str):
+    """
+    Parse reset time string and calculate time remaining until reset.
+
+    Args:
+        reset_str: String like "4pm (America/Los_Angeles)" or "Nov 18, 3pm (America/Los_Angeles)"
+
+    Returns:
+        Formatted string like "XX day(s) XX hr(s) XX min(s)" or None if parsing fails
+    """
+    if not reset_str or reset_str == 'Unknown' or reset_str == 'N/A':
+        return None
+
+    try:
+        # Extract timezone from parentheses
+        tz_match = re.search(r'\(([^)]+)\)', reset_str)
+        if not tz_match:
+            return None
+
+        tz_name = tz_match.group(1)
+        try:
+            tz = zoneinfo.ZoneInfo(tz_name)
+        except:
+            return None
+
+        # Get current time in that timezone
+        now = datetime.now(tz)
+
+        # Remove timezone part to parse the time
+        time_part = reset_str[:tz_match.start()].strip().rstrip(',')
+
+        # Check if it has a date (like "Nov 18, 3pm") or just time (like "4pm")
+        if ',' in time_part:
+            # Has date - parse as "Nov 18, 3pm"
+            # Need to add current year
+            date_with_year = f"{time_part}, {now.year}"
+            try:
+                reset_time = datetime.strptime(date_with_year, "%b %d, %I%p, %Y")
+            except:
+                # Try with different format
+                reset_time = datetime.strptime(date_with_year, "%b %d, %I:%M%p, %Y")
+
+            # Add timezone info
+            reset_time = reset_time.replace(tzinfo=tz)
+
+            # If the reset time is in the past, assume it's next year
+            if reset_time < now:
+                reset_time = reset_time.replace(year=now.year + 1)
+        else:
+            # Just time - assume today or tomorrow
+            try:
+                time_obj = datetime.strptime(time_part, "%I%p")
+            except:
+                time_obj = datetime.strptime(time_part, "%I:%M%p")
+
+            # Combine with today's date
+            reset_time = now.replace(
+                hour=time_obj.hour,
+                minute=time_obj.minute,
+                second=0,
+                microsecond=0
+            )
+
+            # If it's in the past today, it must be tomorrow
+            if reset_time < now:
+                reset_time += timedelta(days=1)
+
+        # Calculate time difference
+        time_diff = reset_time - now
+
+        # Convert to days, hours, minutes
+        total_seconds = int(time_diff.total_seconds())
+        days = total_seconds // 86400
+        remaining_seconds = total_seconds % 86400
+        hours = remaining_seconds // 3600
+        minutes = (remaining_seconds % 3600) // 60
+
+        # Format output
+        parts = []
+        if days > 0:
+            parts.append(f"{days} day(s)")
+        if hours > 0 or days > 0:  # Show hours if there are days
+            parts.append(f"{hours} hr(s)")
+        parts.append(f"{minutes} min(s)")
+
+        return " ".join(parts)
+
+    except Exception:
+        return None
+
+
 def print_subscription_usage_table(usage_data):
     """
     Print subscription usage information in a 5-line table format, with reset info below.
@@ -115,8 +207,23 @@ def print_subscription_usage_table(usage_data):
     print(f"Current week (all models)     : {week_all_bar:<47}| {usage_data['week_all_pct']:>2}% used|")
     print(f"Current week (Opus)           : {week_opus_bar:<47}| {usage_data['week_opus_pct']:>2}% used|")
     print("="*TABLE_WIDTH)
-    print(f"Session resets: {usage_data['session_reset']}")
-    print(f"Weekly resets:  {usage_data['week_reset']}")
+    print()
+
+    # Print session reset with time remaining
+    session_reset_str = usage_data['session_reset']
+    time_remaining = parse_reset_time_and_calculate_remaining(session_reset_str)
+    print(f"Session resets at: {session_reset_str}")
+    if time_remaining:
+        print(f"                   └─ Resets in {time_remaining}")
+
+    print()
+
+    # Print weekly reset with time remaining
+    week_reset_str = usage_data['week_reset']
+    time_remaining = parse_reset_time_and_calculate_remaining(week_reset_str)
+    print(f"Weekly resets at:  {week_reset_str}")
+    if time_remaining:
+        print(f"                   └─ Resets in {time_remaining}")
 
 
 def get_claude_dir():
