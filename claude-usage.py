@@ -68,16 +68,20 @@ def get_subscription_usage():
         clean_output = ansi_escape.sub('', usage_output)
 
         # Extract data
-        percentages = re.findall(r'(\d+)%\s+used', clean_output)
-        reset_times = re.findall(r'Resets\s+(.+)', clean_output)
+        # Note: The output shows "X% left" so we need to convert to "used" (100 - left)
+        percentages_left = re.findall(r'(\d+)%\s+left', clean_output)
+        percentages = [100 - int(p) for p in percentages_left]
+        reset_times_raw = re.findall(r'Resets\s+(.+)', clean_output)
+        # Clean up carriage returns from reset times
+        reset_times = [t.strip().rstrip('\r') for t in reset_times_raw]
 
         if not percentages:
             return None
 
         return {
-            'session_pct': int(percentages[0]) if len(percentages) > 0 else 0,
-            'week_all_pct': int(percentages[1]) if len(percentages) > 1 else 0,
-            'week_opus_pct': int(percentages[2]) if len(percentages) > 2 else 0,
+            'session_pct': percentages[0] if len(percentages) > 0 else 0,
+            'week_all_pct': percentages[1] if len(percentages) > 1 else 0,
+            'week_opus_pct': percentages[2] if len(percentages) > 2 else 0,
             'session_reset': reset_times[0] if len(reset_times) > 0 else 'Unknown',
             'week_reset': reset_times[1] if len(reset_times) > 1 else 'Unknown'
         }
