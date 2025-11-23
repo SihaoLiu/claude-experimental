@@ -13,6 +13,16 @@ import re
 import zoneinfo
 
 
+# Pricing constants (per million tokens)
+INPUT_TOKEN_PRICE = 1.5  # $1.5 / million tokens
+OUTPUT_TOKEN_PRICE = 7.5  # $7.5 / million tokens
+CACHE_INPUT_PRICE = 0.15  # $0.15 / million tokens (cache read)
+CACHE_OUTPUT_PRICE = 1.875  # $1.875 / million tokens (cache creation)
+
+# Subscription pricing
+SUBSCRIPTION_PRICE = 200  # $200 / month
+
+
 def get_subscription_usage():
     """
     Get Claude Code subscription usage by spawning a claude session.
@@ -177,10 +187,12 @@ def parse_reset_time_and_calculate_remaining(reset_str, period_duration_minutes)
             parts.append(f"{hours} hr(s)")
         parts.append(f"{minutes} min(s)")
 
-        # Calculate time elapsed percentage
+        # Calculate time elapsed percentage within the current period
         time_remaining_minutes = total_seconds / 60
-        time_elapsed_minutes = period_duration_minutes - time_remaining_minutes
-        time_elapsed_pct = (time_elapsed_minutes / period_duration_minutes) * 100
+        # Find how much time remains in the current period (using modulo)
+        time_remaining_in_period = time_remaining_minutes % period_duration_minutes
+        time_elapsed_in_period = period_duration_minutes - time_remaining_in_period
+        time_elapsed_pct = (time_elapsed_in_period / period_duration_minutes) * 100
 
         # Ensure percentage is between 0 and 100
         time_elapsed_pct = max(0, min(100, time_elapsed_pct))
@@ -1007,13 +1019,18 @@ def print_overall_stats(stats):
     print(f"Total tokens:          {format_number(stats['total_tokens'])}")
 
 
-def print_model_breakdown(model_stats):
-    """Print model breakdown table."""
-    print("Usage by Model")
+def print_model_breakdown(model_stats, days_in_data=7):
+    """Print model breakdown table.
+
+    Args:
+        model_stats: Model statistics to display
+        days_in_data: Number of days the data covers (for cost projections)
+    """
+    print("Usage / Cost by Model")
     print("=" * 154)
 
     # Print header
-    header = f"│ {'Model':<35} {'Messages':>10} │ {'Input':>15} {'Output':>15} {'Total Token':>15} │ {'Cache Output':>15} {'Cache Input':>15} {'Total (with cache)':>19} │"
+    header = f"│ {'Model':<35} {'Messages':>10} │ {'Input':>15} {'Output':>15} {'Total':>15} │ {'Cache Output':>15} {'Cache Input':>15} {'Cache Total':>19} │"
     print(header)
     print("│" + "-" * 152 + "│")
 
@@ -1057,7 +1074,34 @@ def print_model_breakdown(model_stats):
                f"{format_number(sum_cache_read):>15} "
                f"{format_number(sum_total_with_cache):>19} │")
     print(sum_row)
+
+    # Calculate and print API cost row
+    input_cost = sum_input * INPUT_TOKEN_PRICE / 1_000_000
+    output_cost = sum_output * OUTPUT_TOKEN_PRICE / 1_000_000
+    io_total_cost = input_cost + output_cost
+    cache_output_cost = sum_cache_creation * CACHE_OUTPUT_PRICE / 1_000_000
+    cache_input_cost = sum_cache_read * CACHE_INPUT_PRICE / 1_000_000
+    cache_total_cost = cache_output_cost + cache_input_cost
+    total_cost = io_total_cost + cache_total_cost
+
+    cost_row = (f"│ {'Cost(API)':<35} "
+                f"{'':>10} │ "
+                f"${input_cost:>14.2f} "
+                f"${output_cost:>14.2f} "
+                f"${io_total_cost:>14.2f} │ "
+                f"${cache_output_cost:>14.2f} "
+                f"${cache_input_cost:>14.2f} "
+                f"${total_cost:>18.2f} │")
+    print(cost_row)
     print("=" * 154)
+
+    # Calculate daily, weekly, monthly costs based on average from the data period
+    daily_cost = total_cost / days_in_data if days_in_data > 0 else 0
+    weekly_cost = daily_cost * 7
+    monthly_cost = daily_cost * 30
+    savings = monthly_cost - SUBSCRIPTION_PRICE
+
+    print(f"Daily: ${daily_cost:.2f}, Weekly: ${weekly_cost:.2f}, Monthly(30d): ${monthly_cost:.2f}, Saving ${savings:.2f} (monthly total fee - subscription_price)")
 
 
 def main():
@@ -1105,17 +1149,17 @@ def main():
 
         # Calculate and print statistics using filtered data
         model_stats = calculate_model_breakdown(filtered_usage_data)
-        print_model_breakdown(model_stats)
+        print_model_breakdown(model_stats, days_in_data=args.days)
 
         # Calculate and print token breakdown time series (stacked bar charts)
         # Use 1-hour intervals for finer granularity
         breakdown_time_series = calculate_token_breakdown_time_series(filtered_usage_data, interval_hours=1)
 
         # Print two separate charts: I/O tokens and Cache tokens
-        # Each with reduced height (31 instead of 36) to make room for subscription usage table
-        print_stacked_bar_chart(breakdown_time_series, height=31, days_back=args.days,
+        # Each with reduced height (29) to make room for subscription usage table
+        print_stacked_bar_chart(breakdown_time_series, height=29, days_back=args.days,
                                 chart_type='io', show_x_axis=False)
-        print_stacked_bar_chart(breakdown_time_series, height=31, days_back=args.days,
+        print_stacked_bar_chart(breakdown_time_series, height=29, days_back=args.days,
                                 chart_type='cache', show_x_axis=True)
 
         # Print subscription usage information
