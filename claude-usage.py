@@ -13,11 +13,35 @@ import re
 import zoneinfo
 
 
-# Pricing constants (per million tokens)
-INPUT_TOKEN_PRICE = 1.5  # $1.5 / million tokens
-OUTPUT_TOKEN_PRICE = 7.5  # $7.5 / million tokens
-CACHE_INPUT_PRICE = 0.15  # $0.15 / million tokens (cache read)
-CACHE_OUTPUT_PRICE = 1.875  # $1.875 / million tokens (cache creation)
+# Pricing constants (per million tokens) - model-specific
+MODEL_PRICING = {
+    'claude-sonnet-4-5-20250929': {
+        'input': 1.50,
+        'output': 7.50,
+        'cache_input': 0.15,
+        'cache_output': 1.875,
+    },
+    'claude-haiku-4-5-20251001': {
+        'input': 0.50,
+        'output': 2.50,
+        'cache_input': 0.05,
+        'cache_output': 0.625,
+    },
+    'claude-opus-4-5-20251101': {
+        'input': 2.50,
+        'output': 12.50,
+        'cache_input': 0.25,
+        'cache_output': 3.125,
+    },
+}
+
+# Default pricing (fallback for unknown models, using Sonnet pricing)
+DEFAULT_PRICING = {
+    'input': 1.50,
+    'output': 7.50,
+    'cache_input': 0.15,
+    'cache_output': 1.875,
+}
 
 # Subscription pricing
 SUBSCRIPTION_PRICE = 200  # $200 / month
@@ -1083,12 +1107,22 @@ def print_model_breakdown(model_stats, days_in_data=7):
                f"{format_number(sum_total_with_cache):>19} │")
     print(sum_row)
 
-    # Calculate and print API cost row
-    input_cost = sum_input * INPUT_TOKEN_PRICE / 1_000_000
-    output_cost = sum_output * OUTPUT_TOKEN_PRICE / 1_000_000
+    # Calculate and print API cost row (using model-specific pricing)
+    input_cost = 0
+    output_cost = 0
+    cache_output_cost = 0
+    cache_input_cost = 0
+
+    for stats in model_stats:
+        model = stats['model']
+        pricing = MODEL_PRICING.get(model, DEFAULT_PRICING)
+
+        input_cost += stats['input'] * pricing['input'] / 1_000_000
+        output_cost += stats['output'] * pricing['output'] / 1_000_000
+        cache_output_cost += stats['cache_creation'] * pricing['cache_output'] / 1_000_000
+        cache_input_cost += stats['cache_read'] * pricing['cache_input'] / 1_000_000
+
     io_total_cost = input_cost + output_cost
-    cache_output_cost = sum_cache_creation * CACHE_OUTPUT_PRICE / 1_000_000
-    cache_input_cost = sum_cache_read * CACHE_INPUT_PRICE / 1_000_000
     cache_total_cost = cache_output_cost + cache_input_cost
     total_cost = io_total_cost + cache_total_cost
 
