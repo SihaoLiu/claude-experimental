@@ -78,9 +78,9 @@ def get_subscription_usage():
         clean_output = ansi_escape.sub('', usage_output)
 
         # Extract data
-        # Note: The output shows "X% left" so we need to convert to "used" (100 - left)
-        percentages_left = re.findall(r'(\d+)%\s+left', clean_output)
-        percentages = [100 - int(p) for p in percentages_left]
+        # The output shows "X% used"
+        percentages_used = re.findall(r'(\d+)%\s+used', clean_output)
+        percentages = [int(p) for p in percentages_used]
         reset_times_raw = re.findall(r'Resets\s+(.+)', clean_output)
         # Clean up carriage returns from reset times
         reset_times = [t.strip().rstrip('\r') for t in reset_times_raw]
@@ -91,7 +91,7 @@ def get_subscription_usage():
         return {
             'session_pct': percentages[0] if len(percentages) > 0 else 0,
             'week_all_pct': percentages[1] if len(percentages) > 1 else 0,
-            'week_opus_pct': percentages[2] if len(percentages) > 2 else 0,
+            'week_sonnet_pct': percentages[2] if len(percentages) > 2 else 0,
             'session_reset': reset_times[0] if len(reset_times) > 0 else 'Unknown',
             'week_reset': reset_times[1] if len(reset_times) > 1 else 'Unknown'
         }
@@ -214,7 +214,7 @@ def print_subscription_usage_table(usage_data):
         print("="*TABLE_WIDTH)
         print("Current session               :                                              | N/A    |")
         print("Current week (all models)     :                                              | N/A    |")
-        print("Current week (Opus)           :                                              | N/A    |")
+        print("Current week (Sonnet)         :                                              | N/A    |")
         print("="*TABLE_WIDTH)
         print("Session resets: N/A")
         print("Weekly resets:  N/A")
@@ -227,12 +227,12 @@ def print_subscription_usage_table(usage_data):
 
     session_bar = make_bar(usage_data['session_pct'])
     week_all_bar = make_bar(usage_data['week_all_pct'])
-    week_opus_bar = make_bar(usage_data['week_opus_pct'])
+    week_sonnet_bar = make_bar(usage_data['week_sonnet_pct'])
 
     print("="*TABLE_WIDTH)
     print(f"Current session               : {session_bar:<47}| {usage_data['session_pct']:>2}% used|")
     print(f"Current week (all models)     : {week_all_bar:<47}| {usage_data['week_all_pct']:>2}% used|")
-    print(f"Current week (Opus)           : {week_opus_bar:<47}| {usage_data['week_opus_pct']:>2}% used|")
+    print(f"Current week (Sonnet)         : {week_sonnet_bar:<47}| {usage_data['week_sonnet_pct']:>2}% used|")
     print("="*TABLE_WIDTH)
     print()
 
@@ -350,7 +350,15 @@ def calculate_model_breakdown(usage_data):
 
     # Calculate totals and sort by total tokens
     result = []
+
+    # First pass: calculate total message count and populate result
+    total_messages = sum(stats['count'] for stats in model_stats.values())
+    threshold = total_messages * 0.001  # 0.1% threshold
+
     for model, stats in model_stats.items():
+        # Skip models with less than 0.1% of total messages
+        if stats['count'] < threshold:
+            continue
         stats['model'] = model
         stats['total'] = stats['input'] + stats['output']
         stats['total_with_cache'] = stats['input'] + stats['output'] + stats['cache_creation'] + stats['cache_read']
@@ -1101,7 +1109,12 @@ def print_model_breakdown(model_stats, days_in_data=7):
     monthly_cost = daily_cost * 30
     savings = monthly_cost - SUBSCRIPTION_PRICE
 
-    print(f"Daily: ${daily_cost:.2f}, Weekly: ${weekly_cost:.2f}, Monthly(30d): ${monthly_cost:.2f}, Saving ${savings:.2f} (monthly total fee - subscription_price)")
+    # Calculate cost per million tokens with subscription
+    # Project total tokens to monthly usage
+    monthly_tokens = (sum_total_with_cache / days_in_data) * 30 if days_in_data > 0 else 0
+    cost_per_mtok = SUBSCRIPTION_PRICE / (monthly_tokens / 1_000_000) if monthly_tokens > 0 else 0
+
+    print(f"Daily: ${daily_cost:.2f}, Weekly: ${weekly_cost:.2f}, Monthly(30d): ${monthly_cost:.2f}, Monthly Saving ${savings:.2f}, ${cost_per_mtok:.2f} / MTok")
 
 
 def main():
